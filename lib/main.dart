@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:flutter_alarm_clock/flutter_alarm_clock.dart';
 
 void main() {
   runApp(const MyApp());
@@ -76,7 +77,100 @@ class _MyHomePageState extends State<MyHomePage> {
     return (now.hour * ratio) + (now.minute / 60.0 * ratio);
   }
 
-  void _addTimer() {  }
+  // Returns error message in case of well, error.
+  String _initTimer(String duration, String desc) {
+    const SECS_PER_TICK = 24.0 * 60.0 * 60.0 / 1000.0;
+
+    // 1. is duration valid?
+    if (duration.isEmpty) {
+      return "Failed: Empty duration";
+    }
+    duration = duration.trim();
+
+    // 2. is it ticks or HH:MM
+    RegExp exp_hhmm = RegExp(r"^([0-9]+):([0-9]+)$");
+    var match_hhmm = exp_hhmm.firstMatch(duration);
+    RegExp exp_ticks = RegExp(r"^[0-9]+$");
+    var match_ticks = exp_ticks.firstMatch(duration);
+
+    // 3. setup timer
+    int _timerSecs = 0;
+    if (match_hhmm != null && match_hhmm.groupCount == 2) {
+      // is hh:mm
+      _timerSecs = (double.parse(match_hhmm.group(1).toString()) * 3600).toInt() +
+          (double.parse(match_hhmm.group(2).toString()) * 60).toInt();
+    } else if (match_ticks != null) {
+      // is ticks
+      _timerSecs = (double.parse(match_ticks.group(0).toString()) * SECS_PER_TICK).toInt();
+    } else {
+      // is potato
+      return "Failed: Unrecognizable duration value";
+    }
+
+    // 4. Init timer
+    if (_timerSecs <= 0) {
+      return "Failed: timer duration evaluates to 0 or less";
+    }
+
+    FlutterAlarmClock.createTimer(_timerSecs, title: desc, skipUi: true);
+    print("Started CMG::Timer for $_timerSecs seconds titled: $desc");
+
+    return "";
+  }
+
+  void _showAddTimer() {
+    String _errorMsg = "";
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) {
+          String timerDesc = "";
+          String timerDuration = "";
+          return Scaffold(
+              appBar: AppBar(title: const Text('New Timer')),
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    TextField(
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        hintText: 'Enter time amount in ticks or HH:MM',
+                      ),
+                      keyboardType: TextInputType.datetime,
+                      onChanged: (text) { timerDuration = text; },
+                    ),
+                    const Divider(),
+                    TextField(
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        hintText: 'Description (optional)',
+                      ),
+                      onChanged: (text) { timerDesc = text; },
+                    ),
+                    const Divider(),
+                    ElevatedButton(
+                      child:  const Text('Init Timer', style: TextStyle(fontSize: 20.0)),
+                      onPressed: () {
+                        setState(() {
+                          String err = _initTimer(timerDuration, timerDesc);
+                          if (err.isEmpty) {
+                            Navigator.pop(context);
+                          } else {
+                            _errorMsg = err;
+                            print(_errorMsg);
+                          }
+                        });
+                      },
+                    ),
+                    Text(_errorMsg),
+                  ],
+                ),
+              ),
+          );
+        }
+      )
+    );
+  }
 
   @override
   void initState() {
@@ -126,7 +220,7 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _addTimer,
+        onPressed: _showAddTimer,
         tooltip: 'Add Timer',
         child: const Icon(Icons.add),
       ), // This trailing comma makes auto-formatting nicer for build methods.
