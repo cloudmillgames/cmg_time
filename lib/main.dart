@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter_alarm_clock/flutter_alarm_clock.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 void main() {
   runApp(const MyApp());
@@ -58,6 +60,43 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   int _tunits = 0;
   late Timer _timer;
+  List<Widget> _existingTimers = <Widget>[];
+  late SharedPreferences _sharedPreferences;
+  bool sharedPrefsInitialized = false;
+  List<String> _savedTimers = <String>[];
+  bool _refreshSavedTimers = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initSharedPrefs();
+    _tick();
+  }
+
+  void _initSharedPrefs() async {
+    _sharedPreferences = await SharedPreferences.getInstance();
+    final int? freshTimersCount = _sharedPreferences.getInt('timersCount');
+    sharedPrefsInitialized = true;
+  }
+
+  void _readSavedTimers() {
+    final int? freshTimersCount = _sharedPreferences.getInt('timersCount');
+    int tc = freshTimersCount ?? 0;
+    if (tc != _savedTimers.length) {
+      _refreshSavedTimers = true;
+      final List<String>? freshSavedTimers = _sharedPreferences.getStringList('timers');
+      _savedTimers = freshSavedTimers as List<String>;
+    }
+  }
+
+  void _saveTimer(String desc, String duration, DateTime endtime) async {
+    String start = DateTime.now().toIso8601String();
+    String end = endtime.toIso8601String();
+    String data = '{ "desc": "$desc", "duration": "$duration", "start": "$start", "end": "$end" }';
+    //_savedTimers.add(data);
+    //await _sharedPreferences.setStringList('timers', _savedTimers);
+    print(data);
+  }
 
   void _tick() {
     setState(() {
@@ -68,6 +107,9 @@ class _MyHomePageState extends State<MyHomePage> {
       // called again, and so nothing would appear to happen.
       _tunits = _calcTimeUnits().toInt();
       _timer = Timer(Duration(seconds: 1), _tick);
+      if (sharedPrefsInitialized) {
+        _readSavedTimers();
+      }
     });
   }
 
@@ -86,6 +128,7 @@ class _MyHomePageState extends State<MyHomePage> {
       return "Failed: Empty duration";
     }
     duration = duration.trim();
+    String duration_str = duration; // used for saved information
 
     // 2. is it ticks or HH:MM
     RegExp exp_hhmm = RegExp(r"^([0-9]+):([0-9]+)$");
@@ -97,11 +140,20 @@ class _MyHomePageState extends State<MyHomePage> {
     int _timerSecs = 0;
     if (match_hhmm != null && match_hhmm.groupCount == 2) {
       // is hh:mm
-      _timerSecs = (double.parse(match_hhmm.group(1).toString()) * 3600).toInt() +
-          (double.parse(match_hhmm.group(2).toString()) * 60).toInt();
+      int hours = double.parse(match_hhmm.group(1).toString()).toInt();
+      int minutes = double.parse(match_hhmm.group(2).toString()).toInt();
+      _timerSecs = hours * 3600 + minutes * 60;
+      duration_str = "";
+      if (hours > 0) {
+        duration_str = hours.toString() + " hours ";
+      }
+      if (minutes > 0) {
+        duration_str = minutes.toString() + " minutes";
+      }
     } else if (match_ticks != null) {
       // is ticks
       _timerSecs = (double.parse(match_ticks.group(0).toString()) * SECS_PER_TICK).toInt();
+      duration_str = duration_str + " Ticks";
     } else {
       // is potato
       return "Failed: Unrecognizable duration value";
@@ -115,16 +167,18 @@ class _MyHomePageState extends State<MyHomePage> {
     FlutterAlarmClock.createTimer(_timerSecs, title: desc, skipUi: true);
     print("Started CMG::Timer for $_timerSecs seconds titled: $desc");
 
+    _saveTimer(desc, duration_str, DateTime.now().toUtc());
+
     return "";
   }
 
   void _showAddTimer() {
-    String _errorMsg = "";
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) {
           String timerDesc = "";
           String timerDuration = "";
+          String _errorMsg = "";
           return Scaffold(
               appBar: AppBar(title: const Text('New Timer')),
               body: Center(
@@ -155,8 +209,34 @@ class _MyHomePageState extends State<MyHomePage> {
                           String err = _initTimer(timerDuration, timerDesc);
                           if (err.isEmpty) {
                             Navigator.pop(context);
+                            showDialog(
+                                context: context,
+                                builder: (context) {
+                                  return const SimpleDialog(
+                                    children: [
+                                      Center(
+                                        child: Text("Timer is set",
+                                            style: TextStyle(
+                                                fontSize: 16, fontWeight: FontWeight.bold)),
+                                      )
+                                    ],
+                                  );
+                                });
                           } else {
                             _errorMsg = err;
+                            showDialog(
+                                context: context,
+                                builder: (context) {
+                                  return SimpleDialog(
+                                    children: [
+                                      Center(
+                                        child: Text(_errorMsg,
+                                            style: const TextStyle(
+                                                fontSize: 16, fontWeight: FontWeight.bold)),
+                                      )
+                                    ],
+                                  );
+                                });
                             print(_errorMsg);
                           }
                         });
@@ -172,10 +252,14 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _tick();
+  Widget _createTimerTile(String desc, String duration) {
+    return Card(
+      child: ListTile(
+        leading: Icon(Icons.timer),
+        title: Text(desc),
+        subtitle: Text(duration),
+      ),
+    );
   }
 
   @override
@@ -186,6 +270,22 @@ class _MyHomePageState extends State<MyHomePage> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
+
+    // _existingTimers = [
+    //   _createTimerTile("I AM FIRST"),
+    //   _createTimerTile("SECOND AM I?"),
+    // ];
+
+    // '{ "desc": "I AM TIMER", "duration": "120 ticks", "start": "datetime_in_iso8601", "end": "datetime_in_iso8601" }'
+
+    if (_refreshSavedTimers) {
+      _refreshSavedTimers = false;
+      _existingTimers.clear();
+      for (var s in _savedTimers) {
+        final parsed = jsonDecode(s);
+        _existingTimers.add(_createTimerTile(parsed.desc, parsed.duration));
+      }
+    }
     return Scaffold(
       appBar: AppBar(
         // Here we take the value from the MyHomePage object that was created by
@@ -215,6 +315,13 @@ class _MyHomePageState extends State<MyHomePage> {
             Text(
               '$_tunits',
               style: Theme.of(context).textTheme.headline1,
+            ),
+            Divider(),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: _existingTimers,
+              ),
             ),
           ],
         ),
